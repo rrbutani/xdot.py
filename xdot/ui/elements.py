@@ -497,6 +497,7 @@ class BezierShape(Shape):
 
 
 class CompoundShape(Shape):
+    shapes: list[Shape]
 
     def __init__(self, shapes):
         Shape.__init__(self)
@@ -562,6 +563,8 @@ class Element(CompoundShape):
 
 
 class Node(Element):
+    edges_from_node: list['Edge'] # i.e. children; where this node == edge.src
+    edges_to_node: list['Edge'] # i.e. parents; where this node == edge.dst
 
     def __init__(self, id, x, y, w, h, shapes, url, tooltip):
         Element.__init__(self, shapes)
@@ -577,6 +580,9 @@ class Node(Element):
 
         self.url = url
         self.tooltip = tooltip
+
+        self.edges_from_node = []
+        self.edges_to_node = []
 
     def is_inside(self, x, y):
         return self.x1 <= x and x <= self.x2 and self.y1 <= y and y <= self.y2
@@ -649,6 +655,8 @@ class Edge(Element):
 
 
 class Graph(Shape):
+    edges: list[Edge]
+    nodes: list[Node]
 
     def __init__(self, width=1, height=1, shapes=(), nodes=(), edges=(), outputorder='breadthfirst'):
         Shape.__init__(self)
@@ -674,24 +682,14 @@ class Graph(Shape):
                 shape._draw(cr, highlight=(shape in highlight_items), bounding=bounding)
 
     def _draw_nodes(self, cr, bounding, highlight_items):
-        highlight_nodes = []
-        for element in highlight_items:
-            if isinstance(element, Edge):
-                highlight_nodes.append(element.src)
-                highlight_nodes.append(element.dst)
-            else:
-                highlight_nodes.append(element)
-
         for node in self.nodes:
             if bounding is None or node._intersects(bounding):
-                node._draw(cr, highlight=(node in highlight_nodes), bounding=bounding)
+                node._draw(cr, highlight=(node in highlight_items), bounding=bounding)
 
     def _draw_edges(self, cr, bounding, highlight_items):
         for edge in self.edges:
             if bounding is None or edge._intersects(bounding):
-                should_highlight = any(e in highlight_items
-                                       for e in (edge, edge.src, edge.dst))
-                edge._draw(cr, highlight=should_highlight, bounding=bounding)
+                edge._draw(cr, highlight=(edge in highlight_items), bounding=bounding)
 
     def draw(self, cr, highlight_items=None, bounding=None):
         if bounding is not None:

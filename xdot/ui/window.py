@@ -42,7 +42,7 @@ from ..dot.lexer import ParseError
 from ._xdotparser import XDotParser
 from . import animation
 from . import actions
-from .elements import Graph
+from .elements import Graph, Node, Edge
 
 
 class DotWidget(Gtk.DrawingArea):
@@ -93,6 +93,7 @@ class DotWidget(Gtk.DrawingArea):
         self.drag_action = actions.NullAction(self)
         self.presstime = None
         self.highlight = None
+        self.last_highlight_input = None
         self.highlight_search = False
         self.history_back = []
         self.history_forward = []
@@ -228,15 +229,98 @@ class DotWidget(Gtk.DrawingArea):
         self.y = y
         self.queue_draw()
 
-    def set_highlight(self, items, search=False):
+    # Decimal `dist` is used to indicate that edges should be included (but not
+    # nodes). Some examples (assuming `traverse_parents = False`):
+    #  -     dist = 0 => starting_set
+    #  - 1 > dist > 0 => starting_set + edges from nodes in starting_set
+    #  -     dist = 1 => starting_set + edges from nodes in starting_set + the
+    #                    nodes said edges lead to (children)
+    #
+    # For edges in the starting set, nodes are considered <1 distance away.
+    def node_and_edge_bfs(
+        starting_set: 'None | set[Node | Edge | Shape]',
+        dist: int | float | None,
+        traverse_parents: bool = True,
+    ) -> 'set[Node | Edge | Shape]':
+        if starting_set == None: return set()
+
+        next = set(x for x in starting_set)
+        visited = set(x for x in starting_set)
+        up = traverse_parents
+
+        next_next = set()
+        while (dist == None or dist > 0) and next:
+            enqueue = lambda n: next_next.add(n) if n not in visited else None
+            for n in next:
+                visited.add(n)
+
+                if isinstance(n, Node):
+                    next_edges = n.edges_to_node if up else n.edges_from_node
+                    # Note: edges go directly in `visited`; we enqueue the nodes
+                    # they point to (if appropriate) right away so there's no
+                    # need to revisit them:
+                    if dist == None or dist > 0: visited.update(next_edges)
+                    if dist == None or dist >= 1:
+                        for n in next_edges:
+                            node = n.src if up else n.dst
+                            enqueue(node)
+                elif isinstance(n, Edge):
+                    node = n.src if up else n.dst
+                    enqueue(node)
+
+                    # If we were told to go a little bit further (i.e. decimal
+                    # distance), include the nodes that are reachable from this
+                    # edge in the visited set (even though we will not visit
+                    # them):
+                    if dist != None and dist < 1: visited.add(node)
+
+            # Note on `dist`: because we're doing BFS we can always safely skip
+            # nodes we're already visited; there's no chance that we encounter a
+            # node again via a shorter path from the starting set of nodes (and
+            # thus would need to re-explore the node in case the extra distance
+            # allows us to reach more nodes)
+            if dist != None: dist -= 1
+
+            next.clear()
+            next_next, next = next, next_next # swap and continue
+
+        return visited
+
+    def find_connected_nodes_and_edges(
+        starting_set: 'None | set[Node | Edge | Shape]',
+        include_children: bool = True,
+        include_parents: bool = True,
+        distance_limit: int | float | None = 0.5,
+    ):
+        bfs = lambda up: DotWidget.node_and_edge_bfs(starting_set, distance_limit, traverse_parents=up)
+        return (
+            (starting_set or set()) |
+            (bfs(False) if include_children else set()) |
+            (bfs(True) if include_parents else set())
+        )
+
+    def set_highlight(
+        self,
+        items: 'set[Node | Edge | Shape]',
+        include_children: bool = True,
+        include_parents: bool = True,
+        distance_limit: int | float | None = 0.5,
+        search = False,
+    ):
         # Enable or disable search highlight
         if search:
             self.highlight_search = items is not None
         # Ignore cursor highlight while searching
         if self.highlight_search and not search:
             return
-        if self.highlight != items:
-            self.highlight = items
+
+        # primitive caching (last set of inputs only):
+        highlight_input = (items, include_children, include_parents, include_children, distance_limit)
+        if self.last_highlight_input != highlight_input:
+            self.last_highlight_input = highlight_input
+            self.highlight = DotWidget.find_connected_nodes_and_edges(
+                items, include_children, include_parents, distance_limit,
+            )
             self.queue_draw()
 
     def zoom_image(self, zoom_ratio, center=False, pos=None):

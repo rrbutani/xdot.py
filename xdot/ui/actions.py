@@ -86,7 +86,16 @@ class NullAction(DragAction):
         if item is not None:
             NullAction._tooltip_window.set_transient_for(dot_widget.get_toplevel())
             dot_widget.get_window().set_cursor(Gdk.Cursor(Gdk.CursorType.HAND2))
-            dot_widget.set_highlight(item.highlight)
+            # default: 0.5-dist parent + child
+            # - alt: full dist
+            # - shift: suppress parents
+            # - ctrl: suppress children
+            dot_widget.set_highlight(
+                items = item.highlight,
+                include_children = not (event.state & Gdk.ModifierType.CONTROL_MASK),
+                include_parents = not (event.state & Gdk.ModifierType.SHIFT_MASK),
+                distance_limit = None if event.state & Gdk.ModifierType.MOD1_MASK else 0.5,
+            )
             if item is not NullAction._tooltip_item:
                 # TODO: Should fold this into a method.
                 if isinstance(item, Jump) and item.item.tooltip is not None:
